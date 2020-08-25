@@ -55,7 +55,7 @@ public class Dashboard extends javax.swing.JFrame {
     StreamContentType streamContentType = new StreamContentType();
     SessionConfig sessionConfig = new SessionConfig();
     int chunk = 8000;
-    String accessToken = "02IKHkW422dTYRso7FHLWgAdYGXbZOxDIH_OA4xRPDlfyvNL0_oF5fy5yShwBgBbYGNhSHTUxw8ReE-215T8u9Th3h34A";
+    String accessToken = "0";
     static String appPath;
     StreamingClient streamingClient = new StreamingClient(accessToken);
 
