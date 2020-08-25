@@ -12,12 +12,14 @@ import ai.rev.speechtotext.models.streaming.ConnectedMessage;
 import ai.rev.speechtotext.models.streaming.Hypothesis;
 import ai.rev.speechtotext.models.streaming.SessionConfig;
 import ai.rev.speechtotext.models.streaming.StreamContentType;
+
 import java.awt.AWTException;
 import java.io.ByteArrayInputStream;
 import okio.ByteString;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileWriter;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -37,6 +39,8 @@ import java.util.logging.Logger;
 import javax.sound.sampled.AudioFileFormat;
 import javax.swing.filechooser.FileSystemView;
 import okhttp3.Response;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 
 /**
  *
@@ -55,14 +59,20 @@ public class Dashboard extends javax.swing.JFrame {
     StreamContentType streamContentType = new StreamContentType();
     SessionConfig sessionConfig = new SessionConfig();
     int chunk = 8000;
-    String accessToken = "0";
+    String accessToken = "your rev.ai api key";
     static String appPath;
     StreamingClient streamingClient = new StreamingClient(accessToken);
 
     AudioFileFormat.Type fileType;
-    File audioFile;
-    static String directoryName;
+    File audioFile, jsonFile;
+    static String audiodirectoryPath, jsondirectoryPath, directoryPath;
     CaptureThread captureThread;
+
+    DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    LocalDateTime now;
+    JSONObject transcript;
+    JSONArray messages;
+    private static FileWriter file;
 
     /**
      * Creates new form Dashboard
@@ -136,6 +146,8 @@ public class Dashboard extends javax.swing.JFrame {
         // TODO add your handling code here:
         if (!isStart) {
             System.out.println("start clicked");
+            now = LocalDateTime.now();
+
             isStart = true;
             jButtonStart.setText("Stop");
             jLabelStatus.setText("Connecting. Please wait....");
@@ -200,16 +212,26 @@ public class Dashboard extends javax.swing.JFrame {
             java.util.logging.Logger.getLogger(Dashboard.class.getName()).log(java.util.logging.Level.SEVERE, null, ex);
         }
         //</editor-fold>
-        
-        //</editor-fold>
 
+        //</editor-fold>
         appPath = FileSystemView.getFileSystemView().getDefaultDirectory().getPath();
-        directoryName = appPath + "\\Audiotranscript";
-        File directory = new File(directoryName);
+        directoryPath = appPath + "\\Audiotranscript";
+        File directoryaudio = new File(directoryPath);
+        if (!directoryaudio.exists()) {
+            directoryaudio.mkdir();
+        }
+        audiodirectoryPath = appPath + "\\Audiotranscript\\Audio";
+        jsondirectoryPath = appPath + "\\Audiotranscript\\Json";
+        File directory = new File(audiodirectoryPath);
         if (!directory.exists()) {
             directory.mkdir();
         }
-        System.out.println(directoryName);
+
+        File directoryjson = new File(jsondirectoryPath);
+        if (!directoryjson.exists()) {
+            directoryjson.mkdir();
+        }
+        System.out.println(jsondirectoryPath);
 
         java.awt.EventQueue.invokeLater(() -> {
             Dashboard frame = new Dashboard();
@@ -248,23 +270,47 @@ public class Dashboard extends javax.swing.JFrame {
         }//end catch
     }//end playAudio
 
+    private JSONObject responseToJson(Hypothesis hypothesis) {
+        JSONObject obj = new JSONObject();
+        obj.put("ts", hypothesis.getTs());
+        obj.put("endTs", hypothesis.getEndTs());
+
+        JSONArray elements = new JSONArray();
+        int hypoLength = hypothesis.getElements().length;
+        for (int i = 0; i < hypoLength; i++) {
+            Element element = hypothesis.getElements()[i];
+            JSONObject ele = new JSONObject();
+            ele.put("startTimestamp", element.getStartTimestamp());
+            ele.put("endTimestamp", element.getEndTimestamp());
+            ele.put("type", element.getType());
+            ele.put("value", element.getValue());
+            ele.put("confidence", element.getConfidence());
+            elements.add(ele);
+        }
+        obj.put("elements", elements);
+
+        return obj;
+    }
 //This method captures audio input from a
     // microphone and saves it in a
     // ByteArrayOutputStream object.
+
     private void captureAudio() {
         if (!stopCapture) {
             try {
                 //Get and display a list of
                 // available mixers.
+                transcript = new JSONObject();
+                messages = new JSONArray();
                 Mixer.Info[] mixerInfo
                         = AudioSystem.getMixerInfo();
                 System.out.println("Available mixers:");
-                Mixer.Info rMixer=null;
+                Mixer.Info rMixer = null;
                 for (Mixer.Info mixerInfo1 : mixerInfo) {
                     System.out.println(mixerInfo1.getName());
                     log.setText(mixerInfo1.getName());
-                    if(mixerInfo1.getName().equals("Primary Sound Capture Driver")){
-                        rMixer=mixerInfo1; 
+                    if (mixerInfo1.getName().equals("Primary Sound Capture Driver")) {
+                        rMixer = mixerInfo1;
                     }
                 } //end for loop
 
@@ -278,12 +324,10 @@ public class Dashboard extends javax.swing.JFrame {
 
                 //Select one of the available
                 // mixers.
-              
                 Mixer mixer = AudioSystem.
                         getMixer(rMixer);
-                
 
-                log.setText("Using: "+ rMixer.getName());
+                log.setText("Using: " + rMixer.getName());
                 log.setFocusable(false);
                 //Get a TargetDataLine on the selected
                 // mixer.
@@ -302,7 +346,7 @@ public class Dashboard extends javax.swing.JFrame {
                 // captureThread.start();
             } catch (Exception e) {
                 System.out.println("error cap:" + e);
-                log.setText("Audio Error: "+ e.getMessage());
+                log.setText("Audio Error: " + e.getMessage());
                 streamingClient.close();
                 // System.exit(0);
             }//end catch
@@ -372,7 +416,7 @@ public class Dashboard extends javax.swing.JFrame {
                 byteArrayOutputStream.close();
             } catch (Exception e) {
                 System.out.println("error stream: " + e);
-                  log.setText("Stream Error: "+ e);
+                log.setText("Stream Error: " + e);
                 streamingClient.close();
             }//end catch
         }//end run
@@ -420,8 +464,10 @@ public class Dashboard extends javax.swing.JFrame {
 
         @Override
         public void onHypothesis(Hypothesis hypothesis) {
-            //System.out.println("Response: "+hypothesis.toString());
+
             if (hypothesis.toString().contains("messageType='final'")) {
+                //  System.out.println("Response: " + hypothesis.toString());
+
                 int hypoLength = hypothesis.getElements().length;
                 for (int i = 0; i < hypoLength; i++) {
                     Element element = hypothesis.getElements()[i];
@@ -443,7 +489,9 @@ public class Dashboard extends javax.swing.JFrame {
                     }
 
                 }
-                //   System.out.println();
+                messages.add(responseToJson(hypothesis));
+
+                // System.out.println(messages.toJSONString());
             }
 
         }
@@ -463,10 +511,20 @@ public class Dashboard extends javax.swing.JFrame {
             captureThread.stop();
             targetDataLine.stop();
             targetDataLine.close();
-            DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-            LocalDateTime now = LocalDateTime.now();
-            audioFile = new File(directoryName + "\\" + dtf.format(now) + ".wav");
+            audioFile = new File(audiodirectoryPath + "\\" + dtf.format(now) + ".wav");
             saveAudio(audioFile);
+            //  transcript.put(messages);
+            jsonFile = new File(jsondirectoryPath + "\\" + dtf.format(now) + ".json");
+
+            try {
+                file = new FileWriter(jsonFile);
+                file.write(messages.toJSONString());
+                file.flush();
+                file.close();
+            } catch (IOException ex) {
+                Logger.getLogger(Dashboard.class.getName()).log(Level.SEVERE, null, ex);
+            }
+
         }
 
         @Override
